@@ -1,0 +1,5 @@
+bagpy
+rosbags 
+pandas 
+numpy 
+tqdm
