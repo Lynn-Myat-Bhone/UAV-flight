@@ -7,7 +7,7 @@ from tqdm import tqdm
 # CONFIG
 DATA_DIR = Path("../raw/raw/")
 bags = sorted(list(DATA_DIR.glob("*.bag")))
-OUTPUT_FILE = "attempt_1.csv"
+OUTPUT_FILE = "raw_data.csv"
 
 # SAFE FUNCTIONS
 def safe_float(v):
@@ -130,11 +130,6 @@ for bag in tqdm(bags, desc="Processing bags"):
                     "imu_x": state["imu_x"],
                     "imu_y": state["imu_y"],
                     "imu_z": state["imu_z"],
-
-                    # BATTERY
-                    "battery_voltage": state["battery_voltage"],
-                    "battery_current": state["battery_current"],
-                    "battery_percent": state["battery_percent"],
 
                     # LABELS
                     "engine_fault": state["engine_fault"],

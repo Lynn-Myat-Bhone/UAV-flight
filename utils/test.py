@@ -1,39 +1,22 @@
 from pathlib import Path
 from rosbags.highlevel import AnyReader
 
-bag = Path("../raw/raw/carbonZ_2018-07-18-12-10-11.bag")
+DATA_DIR = Path(r"C:\Project\data_mining\raw/raw/")
+# Target one of your confirmed dead files
+dead_bag = DATA_DIR / "carbonZ_2018-07-18-12-10-11.bag"
 
-with AnyReader([bag]) as reader:
-    for conn, t, raw in reader.messages():
-        print(type(t))
-        print(t)
-        break
-    
-first = None
-last = None
+print(f"Scanning topic structures inside dead file: {dead_bag.name}")
 
-with AnyReader([bag]) as reader:
-    for conn, t, raw in reader.messages():
-        if first is None:
-            first = t
-        last = t
-
-print("First:", first)
-print("Last :", last)
-print("Duration:", last - first)
-
-count = 0
-
-with AnyReader([bag]) as reader:
-    for _ in reader.messages():
-        count += 1
-
-print("Messages:", count)
-
-
-with AnyReader([bag]) as reader:
-    for conn, t, raw in reader.messages():
-        if conn.topic == "/mavros/battery":
-            msg = reader.deserialize(raw, conn.msgtype)
-            print(msg)
-            break
+with AnyReader([dead_bag]) as reader:
+    found_alternatives = []
+    for connection in reader.connections:
+        # Check for VFR_HUD or other common airspeed message placeholders
+        if "vfr_hud" in connection.topic.lower() or "airspeed" in connection.topic.lower():
+            found_alternatives.append((connection.topic, connection.msgtype))
+            
+    if found_alternatives:
+        print("\nFOUND ALTERNATIVES! The missing data might be here:")
+        for topic, msgtype in found_alternatives:
+            print(f"-> Topic: '{topic}' | Type: {msgtype}")
+    else:
+        print("\nNo alternative airspeed topics exist in this file.")
