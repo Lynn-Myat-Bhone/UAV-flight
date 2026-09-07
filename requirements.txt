@@ -3,3 +3,7 @@ rosbags
 pandas 
 numpy 
 tqdm
+xgboost
+joblib
+plotly
+streamlit
