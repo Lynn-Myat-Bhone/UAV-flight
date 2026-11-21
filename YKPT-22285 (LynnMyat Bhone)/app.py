@@ -3,35 +3,103 @@ import pandas as pd
 import numpy as np
 import joblib
 import time
+import torch
+import torch.nn as nn
 import plotly.graph_objects as go
+import plotly.express as px
+from plotly.subplots import make_subplots
 from pathlib import Path
+from scipy.stats import skew, kurtosis
 
 st.set_page_config(page_title="Fault Early-Warning Tester", layout="wide")
 
-# ----------------------------------------------------------------------------
-# 1. Load artifacts
-# ----------------------------------------------------------------------------
+class FaultLSTM(nn.Module):
+    def __init__(self, n_features, hidden_size=64, num_layers=2, dropout=0.2):
+        super().__init__()
+        
+        # 1. Convolutional Front-End
+        self.conv_block = nn.Sequential(
+            nn.Conv1d(in_channels=n_features, out_channels=32, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm1d(32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            
+            nn.Conv1d(in_channels=32, out_channels=64, kernel_size=5, stride=2, padding=2),
+            nn.BatchNorm1d(64),
+            nn.ReLU(),
+            nn.Dropout(dropout)
+        )
+        
+        # 2. Recurrent Layer
+        self.lstm = nn.LSTM(
+            input_size=64,
+            hidden_size=hidden_size,
+            num_layers=num_layers,
+            batch_first=True,
+            dropout=dropout if num_layers > 1 else 0.0,
+            bidirectional=True
+        )
+        
+        self.layer_norm = nn.LayerNorm(hidden_size * 2)
+        
+        # 3. Final Classifier
+        self.fc = nn.Sequential(
+            nn.Linear(hidden_size * 2, 32),
+            nn.ReLU(),
+            nn.Dropout(dropout),
+            nn.Linear(32, 1)
+        )
+
+    def forward(self, x):
+        # x shape: (batch_size, seq_len=500, n_features=19)
+        x = x.permute(0, 2, 1)
+        x = self.conv_block(x)  # Shape: (batch, 64, 125)
+        
+        x = x.permute(0, 2, 1)
+        out, (h_n, c_n) = self.lstm(x)  # Shape: (batch, 125, hidden_size * 2)
+        
+        last_step = out[:, -1, :]  # Shape: (batch, hidden_size * 2)
+        last_step = self.layer_norm(last_step)
+        
+        logit = self.fc(last_step).squeeze(-1)
+        return logit
+    
 ARTIFACT_DIR = Path(__file__).parent
+@st.cache_resource
 
 @st.cache_resource
 def load_artifacts():
-    scaler = joblib.load(ARTIFACT_DIR / "models/scaler_v3.pkl")
-    model_2 = joblib.load(ARTIFACT_DIR / "models/xgboost_f2_v3.pkl")
-    model_1 = joblib.load(ARTIFACT_DIR / "models/xgboost_baseline_v3.pkl")
-    features = joblib.load(ARTIFACT_DIR / "models/features_v3.pkl")
-    best_thresh = joblib.load(ARTIFACT_DIR / "models/best_thresh_v3.pkl")
+    # XGBoost artifacts
+    scaler_xgb = joblib.load(ARTIFACT_DIR / "models/scaler_v3.pkl")
+    model_xgb = joblib.load(ARTIFACT_DIR / "models/xgboost_f2_v3.pkl")
+    features_xgb = joblib.load(ARTIFACT_DIR / "models/features_v3.pkl")
+    thresh_xgb = joblib.load(ARTIFACT_DIR / "models/best_thresh_v3.pkl")
     horizon_sec = joblib.load(ARTIFACT_DIR / "models/horizon_sec_v3.pkl")
-    return scaler, model_1, model_2, features, best_thresh, horizon_sec
+
+    # FaultLSTM artifacts
+    features_lstm = joblib.load(ARTIFACT_DIR / "models/features_lstm_v1.pkl")
+    scaler_lstm = joblib.load(ARTIFACT_DIR / "models/scaler_lstm_v1.pkl")
+    thresh_lstm = joblib.load(ARTIFACT_DIR / "models/best_thresh_lstm_v1.pkl")
+    seq_len_lstm = joblib.load(ARTIFACT_DIR / "models/seq_len_lstm_v1.pkl")
+    
+    lstm_model = FaultLSTM(n_features=len(features_lstm), hidden_size=64, num_layers=2, dropout=0.2)
+    lstm_model.load_state_dict(
+        torch.load(ARTIFACT_DIR / "models/lstm_fault_model_v1.pt", map_location="cpu")
+    )
+    lstm_model.eval()
+
+    return (
+        scaler_xgb, model_xgb, features_xgb, thresh_xgb, horizon_sec,
+        lstm_model, scaler_lstm, features_lstm, thresh_lstm, seq_len_lstm
+    )
 
 try:
-    scaler, model_1, model_2, FEATURES, DEFAULT_THRESH, HORIZON_SEC = load_artifacts()
+    (
+        scaler_xgb, model_xgb, FEATURES, DEFAULT_THRESH, HORIZON_SEC,
+        lstm_model, scaler_lstm, features_lstm, thresh_lstm, SEQ_LEN_LSTM
+    ) = load_artifacts()
 except FileNotFoundError as e:
-    st.error(
-        "Missing model artifact: "
-        f"{e}\n\nMake sure scaler.pkl, xgboost_baseline.pkl, xgboost_f2.pkl, "
-        "features.pkl, best_thresh.pkl and horizon_sec.pkl are in the same "
-        "folder as app.py (run the last cell of the notebook to generate them)."
-    )
+    st.error(f"Missing model artifact: {e}")
     st.stop()
 
 
@@ -126,7 +194,8 @@ def add_future_fault_label(data: pd.DataFrame, horizon_sec: float = 5.0) -> pd.D
     data["fault_within_5s"] = labels
     return data
 
-def predict_flight(flight_df: pd.DataFrame, model, smooth: bool = True):
+def predict_flight_xgb(flight_df: pd.DataFrame, model, scaler, smooth: bool = True):
+    """Predict using XGBoost model."""
     X = flight_df[FEATURES].copy()
     X_scaled = scaler.transform(X)
     raw_probs = model.predict_proba(X_scaled)[:, 1]
@@ -138,6 +207,57 @@ def predict_flight(flight_df: pd.DataFrame, model, smooth: bool = True):
 
     return probs
 
+
+def predict_flight_lstm(
+    flight_df: pd.DataFrame,
+    model,
+    scaler,
+    features,
+    seq_length: int,
+    smooth: bool = True,
+):
+    """Sliding-window prediction using FaultLSTM (CNN-LSTM) with 10-window smoothing."""
+    # Fallback to globally loaded FEATURES if dummy names were saved
+    if "sensor_0" in features and "sensor_0" not in flight_df.columns:
+        features = FEATURES
+
+    X = flight_df[features].copy()
+    X_scaled = scaler.transform(X.values)
+
+    n_samples = len(flight_df)
+    probs = np.zeros(n_samples)
+
+    if n_samples < seq_length:
+        padded = np.pad(
+            X_scaled, ((seq_length - n_samples, 0), (0, 0)), mode="edge"
+        )
+        seq_tensor = torch.FloatTensor(padded).unsqueeze(0)
+        with torch.no_grad():
+            logit = model(seq_tensor)
+            prob = torch.sigmoid(logit).item()
+        probs[:] = prob
+    else:
+        sequences = np.array(
+            [
+                X_scaled[i : i + seq_length]
+                for i in range(n_samples - seq_length + 1)
+            ]
+        )
+        seq_tensor = torch.FloatTensor(sequences)
+
+        with torch.no_grad():
+            logits = model(seq_tensor)
+            seq_probs = torch.sigmoid(logits).numpy()
+
+        probs[seq_length - 1 :] = seq_probs
+        probs[: seq_length - 1] = seq_probs[0]
+
+    if smooth:
+        probs = (
+            pd.Series(probs).rolling(window=10, min_periods=1).mean().values
+        )
+
+    return probs
 
 def fit_pre_onset_regression(time_vals: np.ndarray, prob_vals: np.ndarray):
     """Simple linear regression: probability ~ time. Returns slope, intercept, r2, fitted line."""
@@ -152,9 +272,6 @@ def fit_pre_onset_regression(time_vals: np.ndarray, prob_vals: np.ndarray):
     return slope, intercept, r2, fitted
 
 
-# ----------------------------------------------------------------------------
-# Live replay helpers (stock-ticker style colored line)
-# ----------------------------------------------------------------------------
 STATE_COLORS = {"normal": "#1f77b4", "warning": "#f2c94c", "fault": "#e74c3c"}
 
 
@@ -251,15 +368,16 @@ uploaded_file = st.sidebar.file_uploader(
 )
 
 model_choice = st.sidebar.radio(
-    "Model", ["Model 2 (smoothed, F2-tuned)", "Model 1 (baseline)"], index=0
+    "Select Model Architecture",
+    ["XGBoost (Smoothed)", "CNN-LSTM FaultLSTM (Smoothed)"],
+    index=0
 )
-active_model = model_2 if model_choice.startswith("Model 2") else model_1
-use_smoothing = model_choice.startswith("Model 2")
+active_default_thresh = float(DEFAULT_THRESH) if model_choice == "XGBoost (Smoothed)" else float(thresh_lstm)
 
 threshold = st.sidebar.slider(
     "Warning threshold",
     min_value=0.0, max_value=1.0,
-    value=float(DEFAULT_THRESH) if use_smoothing else 0.30,
+    value=active_default_thresh,
     step=0.01,
 )
 
@@ -314,7 +432,14 @@ with col2:
 # ----------------------------------------------------------------------------
 def analyze_flight(flight_id, label):
     flight_df = processed[processed["flight_id"] == flight_id].sort_values("flight_time_sec").reset_index(drop=True)
-    probs = predict_flight(flight_df, active_model, smooth=use_smoothing)
+    
+    if model_choice == "CNN-LSTM FaultLSTM (Smoothed)":
+        probs = predict_flight_lstm(
+            flight_df, lstm_model, scaler_lstm, features_lstm, SEQ_LEN_LSTM, smooth=True
+        )
+    else:
+        probs = predict_flight_xgb(flight_df, model_xgb,scaler_xgb, smooth=True)
+        
     flight_df = flight_df.copy()
     flight_df["pred_prob"] = probs
     return flight_df
@@ -377,7 +502,7 @@ def make_plot(flight_df, title, onset_time=None, show_regression=False, horizon_
     return fig
 
 
-tab1, tab2 = st.tabs(["📊 Comparison", "📋 Raw predictions", ])
+tab1, tab2 = st.tabs(["Model Comparison", " Descriptive Mining",])
 
 with tab1:
     st.plotly_chart(make_plot(normal_df, f"Normal flight (id={normal_id})", horizon_sec=HORIZON_SEC), use_container_width=True)
@@ -424,17 +549,61 @@ with tab1:
         fired_before_horizon = (before_horizon["pred_prob"] >= threshold).any() if len(before_horizon) > 0 else False
 
 
-    false_positive_rate_normal = (normal_df["pred_prob"] >= threshold).mean()
-    st.caption(f"Normal flight false-alarm rate at this threshold: **{false_positive_rate_normal:.1%}** of frames.")
-
 with tab2:
-    st.write("Faulty flight predictions")
-    st.dataframe(fault_df[["flight_time_sec", "pred_prob", "binary_fault", "fault_onset", "fault_within_5s"]])
-    st.write("Normal flight predictions")
-    st.dataframe(fault_df[["flight_time_sec", "pred_prob", "binary_fault", "fault_onset", "fault_within_5s"]])
+    st.subheader("📊 Descriptive Mining Analysis")
+    st.markdown("Comprehensive statistical analysis of UAV flight data patterns")
 
-    csv_fault = fault_df.to_csv(index=False).encode("utf-8")
-    csv_normal = normal_df.to_csv(index=False).encode("utf-8")
-    c1, c2 = st.columns(2)
-    c1.download_button("Download faulty flight predictions", csv_fault, "fault_flight_predictions.csv", "text/csv")
-    c2.download_button("Download normal flight predictions", csv_normal, "normal_flight_predictions.csv", "text/csv")
+    col1, col2 = st.columns(2)
+
+    with col1:
+        st.image(
+            "descriptive/normal.png",
+            caption="normal flight sample",
+            use_container_width=True
+        )
+
+    with col2:
+        st.image(
+            "descriptive/fault.png",
+            caption="fault flight sample",
+            use_container_width=True
+        )
+    st.image(
+        "descriptive/balancing.png",
+        caption= "Data distribution across dataset",
+        use_container_width=True
+    )
+    st.image(
+        "descriptive/distribution_plots.png",
+        use_container_width=True
+        )
+    st.image(
+        "descriptive/airspeed.png",
+        caption= "Command and Measure across features",
+        use_container_width=True
+    )
+    st.subheader("Association and Hidden Pattern")
+    col3,col4 = st.columns(2)
+    st.image(
+        "descriptive/PCA.png",
+        caption= "Cluster And Principal Component Analysis with Elbow method"
+    )
+    with col3:
+        st.image(
+           "descriptive/lift.png",
+            caption="support vs confidence vs lift",
+            use_container_width=True
+        )
+        st.image(
+            "descriptive/cause_effect.png",
+            caption = "Direct Cause and Effect Identification",
+            use_container_width= True            
+        )
+    
+    with col4:
+        st.image(
+            "descriptive/association.png",
+            caption="Time Lag Rule Network",
+            use_container_width=True
+        )
+        

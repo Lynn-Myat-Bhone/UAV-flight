@@ -7,3 +7,5 @@ xgboost
 joblib
 plotly
 streamlit
+torch
+torch.nn

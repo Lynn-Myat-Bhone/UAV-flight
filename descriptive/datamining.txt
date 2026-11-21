@@ -1,0 +1,634 @@
+UCSY
+
+Introduction
+Context & Domain: UAVs are widely deployed across mission-critical applications including delivery logistics, mapping, and industrial inspection.
+Problem Statement: In-flight component degradations—such as motor malfunctions or actuator failures—pose severe risks of lost payloads and catastrophic ground collisions.
+Core Goal: Build a data-driven framework for real-time fault detection and early anomaly prediction using high-frequency flight telemetry.
+
+
+Normal Flight
+
+Fault Flight
+
+Dataset splitting method
+There are 36 raw bags file contains IOT data.
+30 for train dataset , 6 for test dataset
+Make sure test model are unseen to model to prevent leakage
+
+Category
+Feature
+Purpose
+Identifiers 
+bag, timestamp_ns 
+Identify each UAV flight and preserve the chronological order of measurements. 
+Control Commands 
+roll_cmd, pitch_cmd, yaw_cmd 
+Desired aircraft attitude commanded by the autopilot. 
+Measured Response 
+roll_meas, pitch_meas, yaw_meas, vel_x, vel_y, vel_z, ground_speed 
+Actual aircraft attitude and motion measured by onboard sensors. 
+Derived Features 
+roll_error, pitch_error, yaw_error 
+Difference between commanded and measured values, representing tracking accuracy and control performance. 
+Orientation 
+imu_x, imu_y, imu_z 
+IMU quaternion components describing the UAV's orientation in 3D space. 
+Ground Truth Labels 
+engine_fault, aileron_fault, elevator_fault, rudder_fault 
+Fault labels indicating the presence and type of fault during the flight. 
+
+Original Training Data 
+
+count
+mean
+std
+min
+25%
+50%
+75%
+max
+timestamp_ns
+132937.0
+1.536055e+18
+2.790122e+15
+1.531944e+18
+1.532985e+18
+1.536693e+18
+1.538765e+18
+1.539876e+18
+airspeed_cmd
+132937.0
+1.562505e+01
+4.834310e-01
+1.500000e+01
+1.500000e+01
+1.600000e+01
+1.600000e+01
+1.600000e+01
+airspeed_meas
+132937.0
+4.893964e+00
+7.405477e+00
+0.000000e+00
+0.000000e+00
+0.000000e+00
+1.448553e+01
+2.648424e+01
+airspeed_error
+132937.0
+1.073109e+01
+7.322463e+00
+-1.133438e+01
+1.420175e+00
+1.500000e+01
+1.600000e+01
+1.600000e+01
+roll_cmd
+132937.0
+4.774754e+00
+2.023759e+01
+-4.500000e+01
+-2.340000e+00
+1.170000e+00
+1.375000e+01
+4.499000e+01
+roll_meas
+132937.0
+6.370051e+00
+1.865174e+01
+-6.645238e+01
+-1.124623e+00
+2.366713e+00
+1.384934e+01
+7.128139e+01
+roll_error
+132937.0
+-1.595298e+00
+1.245943e+01
+-1.062053e+02
+-5.706806e+00
+-8.780489e-01
+3.903264e+00
+9.828865e+01
+pitch_cmd
+132914.0
+-6.528449e-01
+5.751668e+00
+-2.499000e+01
+-3.690000e+00
+-4.200000e-01
+1.910000e+00
+2.000000e+01
+pitch_meas
+132914.0
+6.437144e-01
+6.690156e+00
+-5.688078e+01
+-1.615566e+00
+5.730504e-01
+2.629524e+00
+7.293653e+01
+pitch_error
+132914.0
+-1.296559e+00
+7.204381e+00
+-9.304937e+01
+-4.185391e+00
+-1.114845e+00
+1.695808e+00
+5.941078e+01
+yaw_cmd
+132916.0
+-1.384133e+01
+9.954506e+01
+-1.790000e+02
+-8.800000e+01
+0.000000e+00
+8.900000e+01
+1.800000e+02
+yaw_meas
+132916.0
+-2.884425e+01
+9.734514e+01
+-1.799952e+02
+-1.083480e+02
+-6.528709e+01
+6.632828e+01
+1.799866e+02
+yaw_error
+132916.0
+1.500293e+01
+9.996571e+01
+-3.587702e+02
+-9.933205e+00
+8.763168e+00
+5.905129e+01
+3.589952e+02
+vel_x
+124619.0
+-1.151472e+00
+1.268192e+01
+-2.541893e+01
+-1.312910e+01
+4.644060e-03
+9.923890e+00
+3.148082e+01
+vel_y
+124619.0
+5.541502e-01
+9.969014e+00
+-2.644612e+01
+-4.911044e+00
+-2.810141e-02
+6.411929e+00
+2.742930e+01
+vel_z
+124619.0
+-1.380041e-01
+1.649946e+00
+-1.242997e+01
+-6.645271e-01
+-4.791604e-03
+4.653392e-01
+1.415015e+01
+imu_x
+132937.0
+-2.501544e-02
+1.207026e-01
+-6.441474e-01
+-5.112412e-02
+-1.442839e-02
+1.471791e-02
+5.201059e-01
+imu_y
+132937.0
+-2.537859e-02
+1.256810e-01
+-5.007232e-01
+-6.175173e-02
+-1.274014e-02
+1.459156e-02
+4.652857e-01
+imu_z
+132937.0
+-6.000377e-01
+4.973569e-01
+-9.999381e-01
+-9.804843e-01
+-8.698700e-01
+-2.048216e-01
+7.064918e-01
+engine_fault
+132937.0
+9.261530e-02
+2.898937e-01
+0.000000e+00
+0.000000e+00
+0.000000e+00
+0.000000e+00
+1.000000e+00
+aileron_fault
+132937.0
+8.918510e-02
+4.120140e-01
+0.000000e+00
+0.000000e+00
+0.000000e+00
+0.000000e+00
+3.000000e+00
+elevator_fault
+132937.0
+3.407629e-03
+5.827558e-02
+0.000000e+00
+0.000000e+00
+0.000000e+00
+0.000000e+00
+1.000000e+00
+rudder_fault
+132937.0
+3.934194e-03
+6.259989e-02
+0.000000e+00
+0.000000e+00
+0.000000e+00
+0.000000e+00
+1.000000e+00
+
+
+Critical Data Quality Issues Found in Raw Data
+Missing Values (NaNs):
+timestamp_ns & airspeed_*:132937 rows (Complete).
+pitch_*: 132937  rows (23 missing values).
+yaw_*: 132937  rows (21 missing values).
+vel_x, vel_y, vel_z: 172,480 rows (8,318 missing values missing!).
+Fix :  forward-fill and backward fill  NaNs per flight segment 
+
+Raw yaw_error Discontinuity:
+Min: -358.79, Max: +358.99.
+Observation: Raw yaw_error spans nearly  360 due to standard 180 compass wrap-around leaps. Angle wrapping to -180, +180  is mandatory.
+
+
+Need normalize for yaw error problem
+Problem
+errors: Direct subtraction (Target- Measured) across North yields fake massive numbers:
+Math calculation: 1-359 = -358
+Physical reality: The plane is off by only +2 (tiny turn)
+Misleads AI models: The machine learning algorithm mistakes these artificial -358spikes for catastrophic crashes rather than minor 2 drifts.
+Fix: Angle wrapping formula:
+Clean Error = (Raw Error + 180 ) (mod 360) -180
+
+Shortest physical path: Restricts all errors strictly within [-180,180]:
+Math calculation: (-358 + 180)mod9360) - 180 = 2
+Clean data: Removes artificial math spikes, leaving true flight performance signals for model training.
+
+
+Added Ground_speed
+Calculate a 3D Ground Speed Proxy by applying the Euclidean Norm to your fully functional localized velocity channels (vel_x, vel_y, vel_z) 
+
+Ground_Speed = sqrt( (vel_x)^2 + (vel_y)^2 + (vel_z)^2 ) 
+
+Adding Fault_onset and fault within 5s
+
+Binary_fault : describes the current fault state: 0 = normal ,  1 = currently faulty
+However, for predictive modeling, we need to identify the exact moment when the system changes from normal to fault.
+
+fault_within_5s: for every frame (within a single flight), look forward `horizon_sec = 5.0` seconds and check whether a `fault_onset` occurs in that window.
+
+
+Normal distribution check
+
+Distribution Breakdown
+Imu_z : Right-Skewed / Bimodal:Main density centered at -1.0 with a long right-hand tail and secondary hump near 0.0.
+Ground_speed:  Bimodal (Two Distinct Peaks):Not normal. It has two separate density modes: one peak at 0 (idle/ground/crash states) and a second main peak around 17 m/s (cruise speed). A normal distribution can only ever have one central peak.
+vel_x : Trimodal (Three Peaks):Has three distinct operational modes centered around -20 m/s, 0m/s and +18 m/s
+yaw_error_clean : Multimodal (Multiple Wave Peaks):Features multiple sharp peaks scattered across -170, -70, 0, and +110. These multiple modes reflect discrete spiraling and heading lock states.
+roll_error & pitch_error : Leptokurtic (Heavy-Tailed / Non-Gaussian):While they look somewhat "bell-shaped" at first glance because of the tall center spike at 0, they violate normal distribution rules in two ways:
+Fat Tails: Extremely long, flat tails extending out past +-60 to +- 100.
+Asymmetry: The blue faulty distribution on roll_error has a secondary shoulder hump around -30, which never occurs in a normal curve.
+
+
+Feature Scaling
+Feature scaling is applied because the sensor and control variables have very different numerical ranges.
+I used Standard scaler because it preserves Normal Distribution & Unbounded Ranges 
+
+Training process
+Train Scaled Shape: (106827, 19) | Targets: (106827,)
+Val Scaled Shape:   (26110, 19)   | Targets: (26110,)
+Test Scaled Shape:  (47875, 19)  | Targets: (47875,) 
+
+Imbalance Dataset
+
+
+After preprocess
+
+count
+mean
+std
+min
+25%
+50%
+75%
+max
+airspeed_cmd
+132937.0
+15.625053
+0.483431
+15.000000
+15.000000
+16.000000
+16.000000
+16.000000
+airspeed_meas
+132937.0
+4.893964
+7.405477
+0.000000
+0.000000
+0.000000
+14.485530
+26.484240
+airspeed_error
+132937.0
+10.731088
+7.322463
+-11.334381
+1.420175
+15.000000
+16.000000
+16.000000
+roll_cmd
+132937.0
+4.774754
+20.237594
+-45.000000
+-2.340000
+1.170000
+13.750000
+44.989998
+roll_meas
+132937.0
+6.370051
+18.651736
+-66.452385
+-1.124623
+2.366713
+13.849339
+71.281387
+roll_error
+132937.0
+-1.595298
+12.459434
+-106.205280
+-5.706806
+-0.878049
+3.903264
+98.288647
+pitch_cmd
+132937.0
+-0.652871
+5.751217
+-24.990000
+-3.690000
+-0.420000
+1.910000
+20.000000
+pitch_meas
+132937.0
+0.643736
+6.689591
+-56.880775
+-1.612970
+0.573268
+2.628115
+72.936531
+pitch_error
+132937.0
+-1.296607
+7.203785
+-93.049374
+-4.185391
+-1.114845
+1.695190
+59.410775
+yaw_cmd
+132937.0
+-13.831289
+99.545602
+-179.000000
+-88.000000
+0.000000
+89.000000
+180.000000
+yaw_meas
+132937.0
+-28.846057
+97.343010
+-179.995209
+-108.348534
+-65.287086
+66.327911
+179.986572
+vel_x
+132937.0
+-2.543159
+13.414228
+-25.418932
+-14.733768
+-0.220781
+7.282701
+31.480824
+vel_y
+132937.0
+0.693634
+9.667291
+-26.446117
+-3.559784
+0.048068
+5.102370
+27.429300
+vel_z
+132937.0
+-0.285221
+1.696616
+-12.429974
+-0.886661
+-0.013349
+0.400512
+14.150154
+imu_x
+132937.0
+-0.025015
+0.120703
+-0.644147
+-0.051124
+-0.014428
+0.014718
+0.520106
+imu_y
+132937.0
+-0.025379
+0.125681
+-0.500723
+-0.061752
+-0.012740
+0.014592
+0.465286
+imu_z
+132937.0
+-0.600038
+0.497357
+-0.999938
+-0.980484
+-0.869870
+-0.204822
+0.706492
+flight_id
+132937.0
+14.766438
+8.297247
+0.000000
+7.000000
+17.000000
+21.000000
+29.000000
+flight_time_sec
+132937.0
+313.096535
+322.866841
+0.000000
+83.977436
+202.471184
+427.684206
+1439.002051
+yaw_error_clean
+132937.0
+10.489618
+68.105139
+-179.937134
+-10.976898
+7.298576
+41.650822
+179.991806
+ground_speed
+132937.0
+15.215076
+7.197670
+0.010152
+13.928278
+16.871769
+19.541066
+31.503337
+binary_fault
+132937.0
+0.148356
+0.355454
+0.000000
+0.000000
+0.000000
+0.000000
+1.000000
+fault_onset
+132937.0
+0.000248
+0.015754
+0.000000
+0.000000
+0.000000
+0.000000
+1.000000
+fault_within_5s
+132937.0
+0.022808
+0.149291
+0.000000
+0.000000
+0.000000
+0.000000
+1.000000
+
+XGBoost algorithm 
+baseline_model = XGBClassifier(
+    n_estimators=1000,
+    learning_rate=0.05,
+    max_depth=6,
+    scale_pos_weight=pos_weight,
+    eval_metric='aucpr',
+    early_stopping_rounds=50,
+    random_state=42,
+    n_jobs=-1
+)
+---> Validation PR-AUC: 0.4772
+
+              precision    recall  f1-score   support
+
+ Healthy (0)       0.98      0.55      0.71     23890
+  Faulty (1)       0.16      0.90      0.27      2220
+
+    accuracy                           0.58     26110
+   macro avg       0.57      0.73      0.49     26110
+weighted avg       0.91      0.58      0.67     26110 
+---> Optimal Threshold: 0.50
+---> Smooth Validation PR-AUC: 0.4778
+---> Best F2-Score : 0.5197
+
+              precision    recall  f1-score   support
+
+ Healthy (0)       0.96      0.87      0.91     23890
+  Faulty (1)       0.31      0.63      0.41      2220
+
+    accuracy                           0.85     26110
+   macro avg       0.63      0.75      0.66     26110
+weighted avg       0.91      0.85      0.87     26110 
+
+=== Model 1 (xgboost_baseline) on TEST set ===
+Test PR-AUC: 0.2754
+              precision    recall  f1-score   support
+
+ Healthy (0)       0.90      0.81      0.86     41135
+  Faulty (1)       0.29      0.46      0.36      6740
+
+    accuracy                           0.77     47875
+   macro avg       0.60      0.64      0.61     47875
+weighted avg       0.82      0.77      0.79     47875 
+=== Model 2 (xgboost_f2, smoothed) on TEST set ===
+Using threshold from validation: 0.56
+Test PR-AUC: 0.2815
+
+              precision    recall  f1-score   support
+
+ Healthy (0)       0.91      0.96      0.93     41135
+  Faulty (1)       0.61      0.41      0.49      6740
+
+    accuracy                           0.88     47875
+   macro avg       0.76      0.68      0.71     47875
+weighted avg       0.87      0.88      0.87     47875 
+Evaluation on Test Dataset
+
+Evaluation on 5s Early Prediction 
+=== FINAL MODEL (trained on all train+val, threshold=0.10) on TEST set ===
+Test PR-AUC: 0.1550
+Test F2-score: 0.2994
+
+                     precision    recall  f1-score   support
+
+ No fault in 5s (0)       0.99      0.98      0.99     40665
+Fault within 5s (1)       0.20      0.34      0.25       470
+
+           accuracy                           0.98     41135
+          macro avg       0.59      0.66      0.62     41135
+       weighted avg       0.98      0.98      0.98     41135
+
+
+=== Early Prediction Model (xgboost_f2, smoothed) on TEST set ===
+Using threshold from validation: 0.79
+Smoothed Test PR-AUC: 0.0366
+
+                     precision    recall  f1-score   support
+
+ No fault in 5s (0)       0.99      0.98      0.99     40665
+Fault within 5s (1)       0.02      0.03      0.03       470
+
+           accuracy                           0.97     41135
+          macro avg       0.51      0.51      0.51     41135
+       weighted avg       0.98      0.97      0.98     41135 
